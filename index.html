@@ -1,0 +1,1478 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>呉湾フィッシング・ナビゲーター Ultimate</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        :root { --danger: #ff4757; --warning: #ffa502; --safe: #2ed573; --primary: #1e90ff; --text-main: #2f3542; }
+        body { font-family: "Helvetica Neue", Arial, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; color: var(--text-main); }
+        
+        /* ヘッダー */
+        header { background: #2c3e50; color: white; padding: 12px 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 1000; }
+        h1 { margin: 0; font-size: 1.2rem; }
+        #alert-bar { display: none; background: var(--danger); color: white; padding: 10px; text-align: center; font-weight: bold; font-size: 0.9rem; }
+
+        /* レイアウト */
+        #main-container { display: flex; overflow: hidden; height: 100vh; width: 100% }
+        #sidebar { width: 360px; background: #f1f2f6; padding: 15px; box-shadow: 2px 0 5px rgba(0,0,0,0.1);overflow-y: auto; display: flex; flex-direction: column; gap: 15px; z-index: 1000; flex-shrink: 0;}
+        #map { flex: 1; height: 100%;}
+
+        /* UIパーツ */
+        .control-group label { font-weight: bold; font-size: 13px; display: block; margin-bottom: 5px; }
+        .control-group input { width: 100%; padding: 10px; border: 1px solid #ced6e0; border-radius: 6px; box-sizing: border-box; }
+        
+        button { width: 100%; padding: 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-primary { background: #3498db; color: white; border: none; padding: 8px; border-radius: 4px; cursor: pointer; }
+        .btn-primary:hover { background: #0984e3; }
+        .btn-secondary { background: #7bed9f; color: #2f3542; margin-top: 10px; }
+        .btn-secondary:hover { background: #2ed573; }
+
+        /* カードデザイン */
+        .status-card { background: white; padding: 15px; border-radius: 8px; border-left: 5px solid #ccc; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .score-badge { float: right; font-size: 1.2rem; font-weight: bold; color: var(--primary); }
+        
+        /* 理由表示エリア */
+        .reason-list { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee; font-size: 12px; line-height: 1.4; }
+        .reason-good { color: var(--safe); }
+        .reason-bad { color: var(--danger); }
+        .reason-warn { color: var(--warning); }
+
+        /* マーカー */
+        .custom-marker { border-radius: 50%; border: 2px solid white; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; box-shadow: 0 3px 6px rgba(0,0,0,0.3); }
+        .hazard-text { color: var(--danger); font-weight: bold; display: block; margin-top: 5px; }
+
+        /* ローディング */
+        #loading-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.8); display:flex; justify-content:center; align-items:center; z-index: 9999}
+
+        /* 釣りポイントカード（ご希望のデザイン用） */
+        .point-card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            cursor: pointer;
+            position: relative;
+        }
+        .point-card:hover { border-color: #3498db; }
+
+        /*　釣果詳細の吹き出し*/
+        .catch-detail-popup{
+            display: none;
+            position: absolute;
+            top: 35px; /* 数字の下あたりに表示 */
+            right: 10px;
+            background: #333;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            z-index: 2000;
+            white-space: nowrap;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+        .catch-detail-popup::after{
+            content: '';
+            position: absolute;
+            bottom: 100%;
+            right: 20px;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: transparent transparent #333 transparent;
+        }
+        .catch-count-btn{
+            background: #007bff;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+        .catch-count-btn:hover{
+            background: #0056b3;
+        }
+
+        /* AIチャットボタン（右下に固定） */
+        #ai-chat-toggle {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #20c997; /* 鮮やかな緑 */
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 30px;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            cursor: pointer;
+            z-index: 9999;
+            font-size: 16px;
+            transition: transform 0.2s;
+        }
+        #ai-chat-toggle:hover {
+            transform: scale(1.05);
+        }
+
+        /* チャットウィンドウ */
+        #ai-chat-window {
+            display: none; /* 最初は隠す */
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            width: 320px;
+            height: 450px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            z-index: 9999;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #ddd;
+        }
+
+        .ai-chat-header {
+            background: #20c997;
+            color: white;
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
+        }
+
+        #ai-chat-messages {
+            flex: 1;
+            padding: 10px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .ai-message {
+            padding: 8px 12px;
+            border-radius: 10px;
+            font-size: 13px;
+            max-width: 80%;
+            line-height: 1.4;
+        }
+
+        .ai-message.system {
+            background: #e9ecef;
+            align-self: flex-start;
+            color: #333;
+        }
+
+        .ai-message.user {
+            background: #007bff;
+            color: white;
+            align-self: flex-end;
+        }
+
+        .ai-chat-input-area {
+            padding: 10px;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 5px;
+            background: white;
+        }
+
+        #ai-user-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            outline: none;
+        }
+
+        .api-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 2000; /* マップより上に表示 */
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            width: 220px;
+            font-family: sans-serif;
+        }
+        .panel-header { font-size: 12px; font-weight: bold; margin-bottom: 8px; color: #333; }
+        .panel-body input {
+            width: 100%;
+            margin-bottom: 5px;
+            padding: 5px;
+            font-size: 11px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .panel-body button {
+            width: 100%;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>呉湾フィッシング</h1>
+</header>
+<div id="alert-bar"></div>
+
+<div id="main-container">
+    <div id="loading-overlay">データを解析中...</div>
+
+    <div id="api-settings-panel" class="api-panel">
+        <div class="panel-header">🔑 API設定</div>
+        <div class="panel-body">
+            <input type="password" id="key-kure" placeholder="呉市APIトークン">
+            <input type="password" id="key-umishiru" placeholder="海しるサブスクリプションキー">
+            <input type="password" id="key-openai" placeholder="OpenAI APIキー">
+            <button id="save-keys-btn">設定を保存</button>
+            <div id="save-status" style="font-size:10px; margin-top:5px; color:#2ed573;"></div>
+        </div>
+    </div>
+
+    <div id="sidebar">
+        <div class="control-group">
+            <label>日時</label>
+            <div style="display: flex; gap: 5px;">
+                <input type="date" id="date-input" min="2024-01-01" style="flex: 1;">
+                <button onclick="runAnalysis()" class="btn-primary" style="width: auto; padding: 0 10px; font-size: 12px; white-space: nowrap;">
+                    日付を更新
+                </button>
+            </div>
+        </div>
+
+        <!--
+        <div class="control-group">
+            <label>狙う魚種 (空欄で全魚種)</label>
+            <div style="display:flex; gap:5px;">
+                <input type="text" id="fish-input" placeholder="例: アジ, タイ, ヒラメ">
+                <button id="search-btn" class="btn-primary" style="width: 80px;">解析</button>
+            </div>
+            <small style="color:#747d8c; font-size:11px;">※タコ、チヌ、タチウオなども検索可能</small>
+        </div>
+    -->
+        <!--
+        <div class="control-group">
+            <label>狙う魚種 (空欄で全魚種)</label>
+            <div style="display:flex; gap:5px;">
+                <input type="text" id="fish-input" placeholder="例: アジ, タイ, ヒラメ">
+                <button id="search-btn" class="btn-primary" style="width: 80px;">解析</button>
+                <button id="reset-btn" style="background:#76baf6; width: 80px; padding: 5px 0;font-size: 12px; border:none; border-radius:4px; color:white; cursor:pointer;">リセット</button>
+
+            </div>
+            <small style="color:#747d8c; font-size:11px;">※タコ、チヌ、タチウオなども検索可能</small>
+        </div>
+    -->
+        <div class="control-group">
+            <label>狙う魚種 (空欄で全魚種)</label>
+            <div style="display:flex; gap:5px;">
+                <input type="text" id="fish-input" placeholder="例: アジ, タイ, ヒラメ">
+                <button id="search-btn" class="btn-primary" style="width: 80px;">解析</button>
+                <button id="reset-btn" style="background:#76baf6; width: 80px; padding: 5px 0;font-size: 12px; border:none; border-radius:4px; color:white; cursor:pointer;">リセット</button>
+            </div>
+            <small style="color:#747d8c; font-size:11px;">※タコ、チヌ、タチウオなども検索可能</small>
+        </div>
+
+        <div id="info-panel">
+            <label>気象コンディション</label>
+            <div id="weather-info" class="status-card" style="border-left-color: #747d8c;">
+                データ未取得
+            </div>
+
+            <label style="margin-top:15px;">呉湾のおすすめポイント評価</label>
+            <div id="ranking-list"></div>
+        </div>
+
+        <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid #ddd;">
+            <label>周辺施設を検索</label>
+            <div style="display: flex; gap: 5px;">
+                <select id="osm-type-select" style="flex: 1; padding: 8px;">
+                    <option value="toilets">トイレ</option>
+                    <option value="parking">駐車場</option>
+                    <option value="convenience_store">コンビニ</option>
+                </select>
+                <button onclick="searchNearbySpots()" class="btn-secondary" style="width: auto; white-space: nowrap;">
+                    検索
+                </button>
+            </div>
+            <small id="osm-status" style="display:block; margin-top:5px; color:#666; font-size:11px;"></small>
+        </div>
+
+        <div class="control-group" style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 15px;">
+            <label>🐟 釣果チャット(毎日リセットされます)</label>
+            <div id="chat-history" style="height: 150px; overflow-y: auto; background: #f9f9f9; border: 1px solid #eee; padding: 5px; margin-bottom: 5px; font-size: 11px; color: #333;">
+                <div style="color:#999; text-align:center; padding-top:20px;">今日の釣果を報告しよう！<br>※毎日リセットされます</div>
+            </div>
+            <div style="display: flex; gap: 5px;">
+                <input type="text" id="chat-input" placeholder="例: 阿賀マリノポリスでアジが3匹釣れた" style="flex: 1; font-size: 11px">
+                <button onclick="postChat()" class="btn-primary" style="width: auto; padding: 0 10px; font-size:11px;">送信</button>
+            </div>
+        </div>
+
+        <div class="control-group" style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 15px;">
+            <label>🤖 AIに相談</label>
+            <div id="ai-chat-messages" style="height: 150px; overflow-y: auto; background: #f1f3f5; border: 1px solid #eee; padding: 5px; margin-bottom: 5px; font-size: 11px; color: #333; display: flex; flex-direction: column; gap: 5px;">
+                <div style="background:#e9ecef; padding:8px; border-radius:8px; align-self:flex-start;">こんにちは！餌や仕掛けの相談に乗りますよ。</div>
+            </div>
+            <div style="display: flex; gap: 5px;">
+                <input type="text" id="ai-user-input" placeholder="例：チヌのエサは何がいい？" style="flex: 1; font-size: 11px" onkeypress="if(event.key==='Enter') sendToAiAdvisor()">
+                <button onclick="sendToAiAdvisor()" class="btn-primary" style="width: auto; padding: 0 10px; font-size:11px; background:#20c997; border-color:#20c997;">相談</button>
+            </div>
+        </div>
+
+        <!--
+        <div class="control-group" style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 15px;">
+            <label>🐟 今日の釣果チャット</label>
+            <div id="chat-history" style="height: 150px; overflow-y: auto; background: #f9f9f9; border: 1px solid #eee; padding: 5px; margin-bottom: 5px; font-size: 11px; color: #333;">
+                <div style="color:#999; text-align:center; padding-top:20px;">今日の釣果を報告しよう！<br>※毎日リセットされます</div>
+            </div>
+            <div style="display: flex; gap: 5px;">
+                 <input type="text" id="chat-input" placeholder="例: 阿賀マリノポリスでアジが3匹釣れた" style="flex: 1; font-size: 11px">
+                 <button onclick="postChat()" class="btn-primary" style="width: auto; padding: 0 10px; font-size:11px;">送信</button>
+            </div>
+        </div>
+
+        <button id="ai-chat-toggle" onclick="toggleAiChat()">🤖 釣りAIに相談</button>
+        <div id="ai-chat-window">
+            <div class="ai-chat-header">
+                <span>🎣 釣りアドバイザー</span>
+                <button onclick="toggleAiChat()" style="background:none; border:none; color:white; font-weight:bold;">×</button>
+            </div>
+            <div id="ai-chat-messages">
+                <input type="text" id="ai-user-input" placeholder="例：チヌのエサは何がいい？" onkeypress="handleAiEnter(event)">
+                <button onclick="sendToAiAdvisor()">送信</button>
+            </div>
+        </div>
+        -->
+
+    </div>
+
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+
+// --- 1. データ定義 (DB相当) ---
+const FISHING_SPOTS = [
+    { id: 1, name: "阿賀マリノポリス", lat: 34.213783, lng: 132.593513, targets:["アジ","イワシ","タチウオ","メバル","チヌ","アオリイカ","コウイカ"], note: "足場良し。ファミリー向け。駐車場から釣り場まで少し距離がある。" },
+    { id: 2, name: "警固屋アパート横", lat: 34.193630, lng: 132.543904, targets:["キス","カレイ","メバル","チヌ","タチウオ","アオリイカ"] },
+    { id: 3, name: "音戸大橋周辺", lat: 34.195, lng: 132.585, targets:["マダイ","チヌ","メバル"], note: "流れ複雑。上級者向け。", restricted: true }, // 立入禁止シミュレーション
+    { id: 4, name: "倉橋・桂浜", lat: 34.110, lng: 132.505, targets:["アイナメ","アジ","イワシ","メジナ","コウイカ","チヌ","アオリイカ","タイ","タチウオ","タコ","シロギス","カレイ","スズキ","コブダイ","メバル"], note: "砂浜からの投げ釣り。" },
+    { id: 5, name: "小坪新波止", lat: 34.206792, lng: 132.653167, targets:["アイナメ","アジ","イワシ","アオリイカ","タチウオ","シロギス","コブダイ","メバル","スルメイカ","カレイ","セイゴ","カサゴ","チヌ","タコ"], note: "駐車場の使用・釣りは禁止されている。" } ,
+    { id: 6, name: "小用港", lat: 34.241, lng: 132.718, targets:["アジ","イワシ","サヨリ","アオリイカ","タチウオ","メバル","カサゴ"]},
+    { id: 7, name: "呉ポートピアパーク", lat:34.287, lng: 132.514, targets:["アジ","イワシ","チヌ","サヨリ","サバ","タチウオ","メバル"], note:"駐車場有。ファミリー向け。デッキ以外の護岸からの釣りは禁止。"},
+    { id: 8, name: "安浦港", lat: 34.215, lng: 132.570, targets:["イワシ","ウミタナゴ","アナゴ","チヌ","タチウオ","メバル","ハゼ","カレイ","セイゴ","カサゴ"]},
+    { id: 9, name: "狩留賀海浜公園", lat: 34.261, lng: 132.517, targets:["キス","カレイ","サヨリ","メバル","チヌ","アオリイカ"], note: "駐車場有。ファミリー向け。７，８月は海水浴場となるため釣り禁止" },
+    { id: 10, name: "鍋桟橋の波止", lat: 34.211, lng: 132.542, targets:["アジ","サヨリ","キス","メバル","チヌ","タチウオ","アオリイカ"], note: "小さな漁港だが、ブリなどの青物が釣れることもある。" },
+    { id: 11, name: "倉橋島・坪井の波止", lat: 34.200024, lng: 132.535118, targets:["アジ","サヨリ","キス","メバル","チヌ","アオリイカ","サバ","イワシ"]},
+    { id: 12, name: "大崎浦海岸", lat: 34.174501, lng: 132.556433, targets:["キス","カレイ"], note: "駐車場有。"},
+    { id: 13, name: "早瀬漁港", lat: 34.152859, lng: 132.494120, targets:["マダイ","チヌ","メバル","アジ","コブダイ"], note: "潮の流れ複雑。上級者向け。"},
+    { id: 14, name: "釣士田港", lat: 34.147001, lng: 132.502088, targets:["アジ","カレイ","キス","メバル","チヌ","タチウオ","アオリイカ"], note: "駐車場有（電話をする必要がある）。"},
+    { id: 15, name: "宇和木展望所", lat: 34.131092, lng: 132.491401, targets:["キス","チヌ","カレイ","アオリイカ"], note: "駐車スペース有。"},
+    { id: 16, name: "大向港", lat: 34.094211, lng: 132.453393, targets:["アジ","サヨリ","キス","メバル","チヌ","タチウオ","アオリイカ"], note: "足場が良い。駐車場有。"},
+    { id: 17, name: "西宇士", lat: 34.088259, lng: 132.473401, targets:["アジ","サヨリ","キス","メバル","チヌ","タチウオ","アオリイカ","コウイカ","カレイ"], note: "駐車場有。"},
+    { id: 18, name: "尾曽郷港", lat: 34.092024, lng: 132.493553, targets:["アジ","カレイ","キス","メバル","チヌ","タチウオ","アオリイカ"], note: "駐車場有。"},
+    { id: 19, name: "下蒲刈島・梶ヶ浜", lat: 34.171470, lng: 132.668615, targets:["アジ","カレイ","キス","メバル","チヌ","タチウオ","アオリイカ"], note: "駐車場有。"},
+    { id: 20, name: "下蒲刈島・大地蔵港", lat: 34.175103, lng: 132.660993, targets:["アジ","カレイ","キス","メバル","チヌ","タチウオ","アオリイカ"], note: "近くにトイレ有。駐車場有。"},
+    { id: 21, name: "下蒲刈島・向港", lat: 34.189195, lng: 132.687366, targets:["アジ","メバル","チヌ"], note: "駐車場有。"},
+    { id: 22, name: "上蒲刈島・県民の浜", lat: 34.165574, lng: 132.740629, targets:["アジ","カレイ","キス","メバル","チヌ","タチウオ","アオリイカ"], note: "足場が良い。足元から水深あり。"},
+    { id: 23, name: "上蒲刈島・原漁港", lat: 34.171787, lng: 132.724929, targets:["カレイ","キス","メバル","チヌ","タチウオ","アオリイカ"], note: "先端が人気の釣り座。"},
+    { id: 24, name: "豊島・豊島港", lat: 34.179138, lng: 132.797763, targets:["アジ","ウマヅラハギ","メバル","チヌ","タチウオ","コブダイ"], note: "ファミリー向け。近くにトイレ有。"},
+    { id: 25, name: "大崎下島・大浜海水浴場", lat: 34.165280, lng: 132.806032, targets:["アジ","カレイ","キス","メバル","アオリイカ"], note: "駐車場有。潮が早い。"}
+];
+
+// 魚種ごとの適正データ (拡張版)
+const FISH_DB = {
+    "アジ":   { min: 17, max: 24, season: [3,4,5,9,10,11], habitat: "中層"},
+    "クロダイ": { min: 18, max: 25, season: [3,4,5,6,7,8,9,10], habitat: "岩礁"},
+    "タイ":   { min: 15, max: 28, season: [4,5,6,10,11], habitat: "岩礁"}, // マダイ
+    "マダイ": { min: 17, max: 22, season: [4,5,6,7,8,9,10], habitat: "岩礁"},
+    "ヒラメ": { min: 14, max: 23, season: [4,5,6,7,8,9,10,11,12,1,2,3], habitat: "表層"},
+    "キス":   { min: 15, max: 25, season: [5,6,7,8,9,10], habitat: "表層"},
+    "タコ":   { min: 15, max: 23, season: [4,5,6,9,10,11,12], habitat: "砂地"},
+    "マアジ": { min: 19, max: 22, season: [5,6,7,8,9,10,11], habitat: "中層"},
+    "マイワシ": { min: 15, max: 22, season: [5,6,7,8,9], habitat: "表層"},
+    "イワシ": { min: 15, max: 22, season: [3,4,5,6,7,8,9,10,11], habitat: "表層"},
+    "カタクチイワシ": { min: 15, max: 20, season: [5,6,7,8,9,10,11], habitat: "表層"},
+    "マサバ": { min: 15, max: 20, season: [9,10,11,12,1,2,3], habitat: "中層"},
+    "サバ": { min: 15, max: 20, season: [9,10,11,12], habitat: "中層"},
+    "ブリ": { min: 16, max: 22, season: [11,12,1,2,3], habitat: "全層"},
+    "ハマチ": { min: 16, max: 22, season: [4,5,6,7,8,9,10,11,12], habitat: "全層"},
+    "ヤズ": { min: 20, max: 28, season: [9,10,11,12,1], habitat: "全層"},
+    "カンパチ": { min: 20, max: 28, season: [4,5,6,7,8,9,10,11], habitat: "全層"},
+    "キチヌ": { min: 15, max: 28, season: [7,8,9,10], habitat: "底層"},
+    "メバル": { min: 12, max: 16, season: [3,4,5,11], habitat: "岩礁"},
+    "カサゴ": { min: 14, max: 22, season: [11,12,1,2,3,4,5,6,7,8,9,10], habitat: "岩礁"},
+    "アイナメ": { min: 8, max: 15, season: [11,4,5,9,10], habitat: "岩礁"},
+    "アコウ": { min: 16, max: 26, season: [6,7,8,9,10], habitat: "岩礁"},
+    "キジハタ": { min: 16, max: 24, season: [6,7,8,9], habitat: "岩礁"},
+    "タチウオ": { min: 17, max: 26, season: [1,6,7,8,9,10,11,12], habitat: "中層"},
+    "コウイカ": { min: 15, max: 21, season: [4,5,9,10,11], habitat: "底層"},
+    "アオリイカ": { min: 16, max: 25, season: [4,5,6,9,10,11,12], habitat: "中層"},
+    "ミズイカ": { min: 20, max: 25, season: [4,5,6,9,10,11,12], habitat: "中層"},
+    "マコガレイ": { min: 15, max: 26, season: [4,10,11,12,1,2], habitat: "砂地"},
+    "カレイ": { min: 10, max: 17, season: [10,11,3,4,5], habitat: "砂地"},
+    "シロギス": { min: 14, max: 28, season: [5,6,7,8,9,10,11], habitat: "砂地"},
+    "スズキ": { min: 15, max: 20, season: [3,4,5,6,7,8,9,10,11], habitat: "全層"},
+    "シーバス": { min: 16, max: 22, season: [4,5,6,9,10,11], habitat: "全層"},
+    "サヨリ": { min: 14, max: 21, season: [3,4,5,10,11,1,2], habitat: "表層"},
+    "カワハギ": { min: 14, max: 25, season: [8,9,10,11,12,1], habitat: "岩礁"},
+    "ウマヅラハギ": { min: 13, max: 24, season: [5,6,7,8,9], habitat: "中層"},
+    "ハゲ": { min: 20, max: 25, season: [9,10,11,12], habitat: "岩礁"},
+    "サワラ": { min: 15, max: 24, season: [1,2,3,4,5,9,10,11,12], habitat: "表層"},
+    "サゴシ": { min: 13, max: 22, season: [3,4,5,9,10,11], habitat: "表層"},
+    "ボラ": { min: 10, max: 28, season: [1,2,3,4,10,11], habitat: "表層"},
+    "コノシロ": { min: 15, max: 25, season: [5,6,7,8,9,10,11], habitat: "中層"},
+    "カマス": { min: 18, max: 24, season: [4,5,6,7,8,9,10,11], habitat: "中層"},
+    "マゴチ": { min: 16, max: 25, season: [5,6,7,8,9,10], habitat: "砂地"},
+    "コチ": { min: 16, max: 26, season: [3,4,5,6,10,11,12], habitat: "砂地"},
+    "ベラ": { min: 22, max: 26, season: [6,7,8,9,10], habitat: "岩礁"},
+    "キュウセン": { min: 17, max: 26, season: [5,6,7,8,9,10], habitat: "岩礁"},
+    "ギザミ": { min: 20, max: 29, season: [7,8,9], habitat: "岩礁"},
+    "ウミタナゴ": { min: 20, max: 28, season: [1,2,3,4,5,6], habitat: "岩礁"},
+    "メジナ": { min: 16, max: 23, season: [6,7,10,11,12,1,2,3], habitat: "岩礁"},
+    "グレ": { min: 15, max: 20, season: [4,6,7,12,1,2,3], habitat: "岩礁"},
+    "イシダイ": { min: 17, max: 24, season: [4,5,6,9,10,11], habitat: "岩礁"},
+    "ヒラマサ": { min: 18, max: 24, season: [4,5,6,7,8,9,10,11], habitat: "中層"},
+    "マトウダイ": { min: 15, max: 28, season: [3,4,5,9,10,11], habitat: "底層"},
+    "ホウボウ": { min: 23, max: 25, season: [9,10,11,12,1], habitat: "砂地"},
+    "カナガシラ": { min: 17, max: 20, season: [3,4,5,9,10,11], habitat: "砂地"},
+    "イトヨリダイ": { min: 20, max: 25, season: [9,10,11,12], habitat: "底層"},
+    "アマダイ": { min: 18, max: 24, season: [10,11,12,1,2,3,4,5], habitat: "砂地"},
+    "トラフグ": { min: 16, max: 23, season: [2,3,4,5], habitat: "底層"},
+    "ショウサイフグ": { min: 17, max: 22, season: [5,6,7,10,11,12,1], habitat: "全層"},
+    "クサフグ": { min: 24, max: 26,season: [10,11,12,1,2,3,4,5], habitat: "渚"},
+    "ハゼ": { min: 15, max: 25, season: [9,10,11], habitat: "砂地"},
+    "マハゼ": { min: 15, max: 24, season: [7,8,9,10,11,12,1,2], habitat: "砂地"},
+    "アナゴ": { min: 13, max: 26, season: [6,7,8,9,10], habitat: "底層"},
+    "マアナゴ": { min: 14, max: 23, season: [6,7,8,9,10], habitat: "底層"},
+    "ハモ": { min: 17, max: 26, season: [6,7,8,9,10,11], habitat: "底層"},
+    "エソ": { min: 15, max: 25, season: [4,5,6,7], habitat: "砂地"},
+    "ヒイラギ": { min: 20, max: 25, season: [5,6,7,8,9,10], habitat: "砂地"},
+    "イシモチ": { min: 17, max: 22, season: [5,6,7,8,9,10,11], habitat: "砂地"},
+    "グチ": { min: 17, max: 22, season: [4,6,8,9,10], habitat: "砂地"},
+    "コチ": { min: 17, max: 26, season: [3,4,5,6,10,11,12], habitat: "砂地"},
+    "アイゴ": { min: 18, max: 25, season: [6,7,8,9], habitat: "岩礁"},
+    "トビウオ": { min: 17, max: 20, season: [9,10,11,12], habitat: "表層"},
+    "シイラ": { min: 22, max: 30, season: [6,7,8,9,10,11], habitat: "表層"},
+    "ペンペン": { min: 20, max: 25, season: [3,4,5,6,7,8], habitat: "表層"},
+    "ダツ": { min: 17, max: 22, season: [3,4,5,9,10,11], habitat: "表層"},
+    "コバンザメ": { min: 23, max: 27, season: [6,7,8], habitat: "表層"},
+    "エイ": { min: 24, max: 27, season: [4,5,6,9,10,11,12], habitat: "底層"},
+    "アカエイ": { min: 24, max: 28, season: [5,6,7,8,9,10,11], habitat: "底層"},
+    "サメ": { min: 22, max: 26, season: [6,7,8], habitat: "全層"},
+    "ドチザメ": { min: 17, max: 25, season: [6,7,8], habitat: "全層"},
+    "ネコザメ": { min: 21, max: 23, season: [3,4,5], habitat: "岩礁"},
+    "ゴンズイ": { min: 20, max: 28, season: [6,7,8,9,10], habitat: "岩礁"},
+    "ハオコゼ": { min: 22, max: 28, season: [6,7,8,9,10,11], habitat: "岩礁"},
+    "ウナギ": { min: 23, max: 27, season: [4,5,6,7,8,9,10], habitat: "河口"},
+    "ニベ": { min: 16, max: 20, season: [4,5,6,7,8,9], habitat: "砂地"},
+    "シマアジ": { min: 19, max: 24, season: [6,7,8,9], habitat: "中層"},
+    "アカササノハベラ": { min: 21, max: 25, season: [4,5,6,7,8], habitat: "岩礁"},
+    "ホンベラ": { min: 17, max: 25, season: [5,6], habitat: "岩礁"},
+    "キビナゴ": { min: 18, max: 23, season: [4,5,6,7,8,9,10,11], habitat: "表層"},
+    "ギンガメアジ": { min: 19, max: 25, season: [3,4,5,6,7,8,9,10,11,12,1,2], habitat: "中層"},
+    "メッキ": { min: 19, max: 28, season: [8,9,10,11], habitat: "中層"},
+    "イトヒキアジ": { min: 19, max: 23, season: [6,7,8,9,10,11], habitat: "中層"},
+    "コブダイ": { min: 15, max: 23, season: [4,5,6,9,10,11], habitat: "中層"},
+    "スルメイカ": { min: 19, max: 25, season: [5,6,7,8,9], habitat: "中層"},
+    "セイゴ": { min: 15, max: 25, season: [4,5,6,,7,8,9,10,11], habitat: "全層"}
+};
+
+// --- 2. マップ初期化 ---
+const map = L.map('map').setView([34.22, 132.58], 12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+//apiキーを管理するグローバル変数
+let API_KEYS = {
+    kure: '',
+    umishiru: '',
+    openai: ''
+};
+
+//チャット投降後にリストを更新するためのグローバル変数
+let markersMap = {};
+let lastSpotsData = [];
+
+// マーカー管理用グループ
+const mainLayer = L.layerGroup().addTo(map); // 呉市の主要ポイント用
+const osmLayer = L.layerGroup().addTo(map);  // OSM検索結果用
+
+// --- 3. メイン処理 (解析ボタン) ---
+document.getElementById('search-btn').addEventListener('click', runAnalysis);
+document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem('my_fishing_api_keys');
+    if(saved){
+        API_KEYS = JSON.parse(saved);
+        if(document.getElementById('key-kure')) document.getElementById('key-kure').value = API_KEYS.kure;
+        if(document.getElementById('key-umishiru')) document.getElementById('key-umishiru').value = API_KEYS.umishiru;
+        if(document.getElementById('key-openai')) document.getElementById('key-openai').value = API_KEYS.openai;
+    }
+    document.getElementById('date-input').value = new Date().toISOString().split('T')[0];
+    runAnalysis();
+});
+
+document.getElementById('reset-btn').addEventListener('click', () =>{
+    document.getElementById('fish-input').value = "";
+    runAnalysis();
+})
+
+document.getElementById('save-keys-btn').addEventListener('click', () => {
+    API_KEYS.kure = document.getElementById('key-kure').value.trim();
+    API_KEYS.umishiru = document.getElementById('key-umishiru').value.trim();
+    API_KEYS.openai = document.getElementById('key-openai').value.trim();
+    
+    localStorage.setItem('my_fishing_api_keys', JSON.stringify(API_KEYS));
+    
+    // 海流レイヤー（tidalLayer）が既にある場合は、新しいキーを反映させる
+    if (typeof tidalLayer !== 'undefined') {
+        tidalLayer.options.ocp_apim_subscription_key = API_KEYS.umishiru;
+        tidalLayer.redraw();
+    }
+    
+    const status = document.getElementById('save-status');
+    if(status) {
+        status.innerText = "✅ 保存しました（反映には再読み込みを推奨）";
+        setTimeout(() => { status.innerText = ""; }, 3000);
+    }
+});
+
+// 海しるAPIの海流レイヤーを追加
+const tidalLayer = L.tileLayer.wms("https://api.msil.go.jp/oceanography/tidal-stream/prediction/seto-island-sea/v2/wms", {
+    layers: '0', // 海流のレイヤー名
+    format: 'image/png',
+    transparent: true,
+    opacity: 0.8, // 少し透けさせる
+    styles: 'style-arrow-blue',
+    ocp_apim_subscription_key: API_KEYS.umishiru,
+}).addTo(map);
+
+async function runAnalysis() {
+    const date = document.getElementById('date-input').value;
+    const fishInput = document.getElementById('fish-input').value.trim();
+
+    if(!date){
+        alert("カレンダーから日付を選択してください。");
+        return;
+    }
+
+    const selectedDate = new Date(date);
+    const targetMonth = selectedDate.getMonth() + 1;
+    
+    // 魚種名の正規化
+    let targetFish = null;
+    let fishName = "全魚種";
+    
+    if (fishInput) {
+        const key = Object.keys(FISH_DB).find(k => k.includes(fishInput) || fishInput.includes(k));
+        if (key) {
+            targetFish = FISH_DB[key];
+            fishName = key;
+        } else {
+            fishName = fishInput + " (データなし)";
+        }
+    }
+
+    try {
+        // A. 天気取得
+        const weather = await fetchWeather(date);
+        updateWeatherUI(weather);
+
+        // ★ B. 水温取得 (修正箇所：新しい関数名を呼び出す)
+        const waterDataList = await getWaterTempFinal(); 
+
+        // C. ポイントごとのスコア計算
+        // waterDataList は [{id:1, temp:15.0}, ...] の形になっているので map が使える
+        const rankedSpots = waterDataList.map(data => {
+            // IDで紐づけ（data.id と spot.id を照合）
+            const spotInfo = FISHING_SPOTS.find(s => s.id === data.id);
+            if (!spotInfo) return null; // 万が一スポットがない場合
+
+            const waterTemp = data.temp;
+            
+            const analysis = calculateScore(spotInfo, waterTemp, weather, targetFish, fishName, date);
+            
+            return {
+                ...spotInfo,
+                temp: waterTemp,
+                score: analysis.score,
+                reasons: analysis.reasons
+            };
+        }).filter(s => s !== null); // 無効なデータを除去
+
+        // D. 描画
+        renderResults(rankedSpots, weather);
+
+    } catch (e) {
+        console.error("解析エラー:", e);
+        alert("データ取得中にエラーが発生しました");
+    } finally {
+        showLoading(false);
+    }
+}
+
+// --- 4. スコアリング＆理由生成ロジック ---
+function calculateScore(spot, temp, weather, fishData, fishName, dateStr) {
+    let score = 50; // 基準点
+    let reasons = []; // 理由リスト
+
+    // 1. 立ち入り禁止チェック
+    if (spot.restricted) {
+        return { score: 0, reasons: ["⛔ 【危険】立ち入り禁止・または危険区域"] };
+    }
+
+    // 2. 風速チェック
+    if (weather.wind >= 10) {
+        score -= 50;
+        reasons.push(`<span class="reason-bad">🌪️ 暴風警報レベル (風速${weather.wind}m/s)。釣行不可。</span>`);
+    } else if (weather.wind >= 6) {
+        score -= 20;
+        reasons.push(`<span class="reason-warn">🚩 強風のため釣りにくい (${weather.wind}m/s)</span>`);
+    } else {
+        score += 10;
+        reasons.push(`<span class="reason-good">🍃 風穏やか。釣り日和。</span>`);
+    }
+
+    // 3. 魚種別チェック
+    if (fishData) {
+        // A. 水温適性
+        if (temp >= fishData.min && temp <= fishData.max) {
+            score += 30;
+            reasons.push(`<span class="reason-good">🌡️ ${fishName}の適水温です (${temp.toFixed(1)}℃)</span>`);
+        } else {
+            score -= 20;
+            const diff = temp < fishData.min ? "低すぎ" : "高すぎ";
+            reasons.push(`<span class="reason-bad">🌡️ 水温が${fishName}には${diff}ます (${temp.toFixed(1)}℃)</span>`);
+        }
+
+        // B. シーズン（月）適性
+        const month = new Date(dateStr).getMonth() + 1;
+        if (fishData.season.includes(month)) {
+            score += 20;
+            reasons.push(`<span class="reason-good">📅 今は${fishName}のハイシーズンです</span>`);
+        } else {
+            score -= 20;
+            reasons.push(`<span class="reason-warn">📅 ${fishName}のシーズンから外れています</span>`);
+        }
+
+        // C. ポイントの生息実績 (スポット情報にその魚が含まれるか)
+        // 部分一致でチェック
+        const isTargetSpot = spot.targets.some(t => fishName.includes(t) || t.includes(fishName));
+        if (isTargetSpot) {
+            score += 20;
+            reasons.push(`<span class="reason-good">📍 ここは${fishName}の実績ポイントです</span>`);
+        } else {
+            score -= 10;
+            reasons.push(`<span class="reason-warn">📍 この場所で${fishName}はあまり釣れません</span>`);
+        }
+
+        //　★重要：シーズン外ならどれだけ条件が良くても最大70点に抑える
+        if(!fishData.season.includes(month)){
+            score = Math.min(score, 70);
+        }
+
+    } else if (fishName !== "全魚種") {
+        // データにない魚が入力された場合
+        reasons.push(`<span class="reason-warn">❓ 「${fishName}」の詳細データがありません。一般的な気象条件で判定します。</span>`);
+    }
+
+    // 4. スコアの範囲調整 (0〜100)
+    score = Math.max(0, Math.min(100, score));
+
+    return { score, reasons };
+}
+
+
+// エラー回避用の仮関数（もし本物がない場合）
+function focusPoint(name) {
+    //markersMapから該当するマーカー（ピン）を探す
+    const marker = markersMap[name];
+    if(marker){
+        //１．地図をその地点へ移動させ、ズームレベルを15にする
+        map.setView(marker.getLatLng(), 15, {
+            animate: true,
+            duration: 1.0 //1秒かけて移動
+        });
+
+        //２．そのピンのポップアップ（吹き出し）を自動で開く
+        marker.openPopup();
+
+        console.log(name + "にズームしました");
+    }else{
+        console.warn(name + "のマーカーが見つかりません");
+    }
+}
+
+function renderResults(spots, weather) {
+    // データを保存しておく
+    lastSpotsData = spots;
+
+    if (typeof markersMap === 'undefined') markersMap = {};
+    if (typeof mainLayer !== 'undefined') mainLayer.clearLayers();
+
+    const listEl = document.getElementById('ranking-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    spots.sort((a, b) => b.score - a.score);
+
+    spots.forEach(spot => {
+        try {
+            let color = '#ff4757';
+            if (spot.score >= 70) color = '#2ed573';
+            else if (spot.score >= 40) color = '#ffa502';
+
+            // データの取得
+            const dbCatch = dailyCatchData[spot.name] || { total: 0, details: {} };
+            const currentTotal = Math.max(dbCatch.total, spot.catchCount || 0);
+            const hasCatch = currentTotal > 0;
+
+            // マーカー作成 (既存ママ)
+            const icon = L.divIcon({
+                html: `<div class="custom-marker" style="background:${color}; width:32px; height:32px; border-radius:50%; display:flex; justify-content:center; align-items:center; color:white; font-weight:bold; border:2px solid white;">${Math.floor(spot.score)}</div>`,
+                className: ''
+            });
+        
+            const catchText = hasCatch ? `<br><b>🐟 今日の釣果: ${currentTotal}匹</b>` : "";
+            const popupContent = `
+                <b>${spot.name}</b><br>
+                評価: ${spot.score}点 / 水温: ${spot.temp.toFixed(1)}℃<br>
+                ${catchText}
+                <div style="margin-top:5px; font-size:11px;">${spot.reasons.join('<br>')}</div>
+            `;
+
+            const marker = L.marker([spot.lat, spot.lng], { icon: icon, scoreValue: spot.score})
+                .bindPopup(popupContent)
+                .addTo(mainLayer);
+        
+            markersMap[spot.name] = marker;
+
+            // サイドバーのカード
+            const item = document.createElement('div');
+            item.className = 'status-card';
+            item.style.borderLeftColor = color;
+            item.style.cursor = 'pointer';
+
+            item.onclick = (e) => {
+                // ボタン（数字）をクリックしたときは地図移動などを発動させない
+                if(e.target.classList.contains('catch-count-btn')) return;
+                if(typeof focusPoint === 'function') focusPoint(spot.name);
+                if(typeof toggleNote === 'function') toggleNote(spot.id || spot.name);
+            };
+
+            // --- 釣果表示用のHTML (ここがAI対応のポイント) ---
+            let catchHtml = "";
+            if (hasCatch) {
+                // AIが解析した内訳（details）を「魚種:匹数」の形式に変換
+                const detailsStr = Object.entries(dbCatch.details || {})
+                    .map(([fish, num]) => `${fish}:${num}匹`)
+                    .join('、');
+            
+                catchHtml = `
+                    <div style="margin-top:5px; font-size:12px; font-weight:bold; color:#0056b3; display:flex; flex-direction:column;">
+                        <div>今日の釣果報告: 
+                            <span class="catch-count-btn" 
+                                  onclick="toggleCatchDetail(this, '${detailsStr}')" 
+                                  data-count="${currentTotal}匹"
+                                  style="background:#007bff; color:white; padding:2px 8px; border-radius:10px; margin-left:5px; font-size:11px; cursor:pointer;">
+                                ${currentTotal}
+                            </span>
+                        </div>
+                        <div class="catch-detail-info" style="display:none; margin-top:5px; padding:5px; background:#f0f7ff; border-radius:4px; font-size:11px; color:#333;"></div>
+                    </div>
+                `;
+            } else {
+                catchHtml = `<div style="margin-top:5px; font-size:12px; color:#999;">今日の釣果報告: 0</div>`;
+            }
+
+            item.innerHTML = `
+                <span class="score-badge" style="color:${color}; float:right; font-size:18px; font-weight:bold;">${Math.floor(spot.score)}点</span>
+                <strong>${spot.name}</strong>
+                <div style="font-size:12px; color:#666;">水温: ${spot.temp.toFixed(1)}℃</div>
+                ${catchHtml}
+                <div class="reason-list" style="font-size:12px; margin-top:5px;">${spot.reasons.join('<br>')}</div>
+                <div id="note-${spot.id || spot.name}" style="display:none; margin-top:10px; padding-top:10px; border-top:1px dashed #ccc; font-size:12px;">
+                    <strong>🐟 狙える魚:</strong> ${spot.targets ? spot.targets.join('、') : '情報なし'}<br>
+                    <strong>📝 メモ:</strong> ${spot.note || '詳細情報はありません。'}
+                </div>
+            `;
+            listEl.appendChild(item);
+
+        } catch (e) {
+            console.error("個別スポット描画エラー:", e);
+        }
+    });
+}
+
+function toggleCatchDetail(btn, detailsStr) {
+    // ボタンの親の親（div）の中にある「catch-detail-info」というクラスのエリアを探す
+    const detailDiv = btn.parentElement.parentElement.querySelector('.catch-detail-info');
+    
+    if (detailDiv.style.display === 'none') {
+        detailDiv.style.display = 'block';
+        detailDiv.innerHTML = `<strong>📊 内訳:</strong><br>${detailsStr || '詳細なし'}`;
+        btn.innerText = '閉じる';
+    } else {
+        detailDiv.style.display = 'none';
+        // data-count属性に保存しておいた元の数字を表示する
+        btn.innerText = btn.getAttribute('data-count').replace('匹', ''); 
+    }
+}
+
+// --- 詳細内訳を開閉する関数 ---
+function toggleCatchDetail(btn, detailsStr) {
+    // ボタンのすぐ下にある詳細エリアを探す
+    const detailDiv = btn.parentElement.nextElementSibling;
+    
+    if (detailDiv.style.display === 'none') {
+        detailDiv.style.display = 'block';
+        detailDiv.innerHTML = `<strong>内訳:</strong> ${detailsStr || '詳細なし'}`;
+        btn.innerText = '閉じる';
+    } else {
+        detailDiv.style.display = 'none';
+        btn.innerText = btn.getAttribute('data-count'); // 元の数字に戻す
+    }
+}
+
+//　これが元のやつ
+function toggleNote(id){
+    const noteEl = document.getElementById(`note-${id}`);
+    if(noteEl){
+        if(noteEl.style.display === 'none'){
+            noteEl.style.display = 'block';
+        }else{
+            noteEl.style.display = 'none';
+        }
+    }
+}
+
+// --- 6. OSM (Overpass API) 検索機能 ---
+async function searchNearbySpots() {
+    const btn = document.querySelector('.btn-secondary');
+    const status = document.getElementById('osm-status');
+    const type = document.getElementById('osm-type-select').value; // プルダウンの値を取得
+    
+    btn.disabled = true;
+    btn.innerText = "検索中...";
+    osmLayer.clearLayers(); // 前回の検索結果を消す
+
+    const bounds = map.getBounds();
+    const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+
+    // --- タグの判定ロジック ---
+    let queryKey = "amenity";
+    let queryValue = type;
+    let iconChar = "📍";
+    let color = "#3498db";
+    let typeLabel = "";
+
+    if (type === 'convenience_store') {
+        queryKey = "shop";
+        queryValue = "convenience";
+        iconChar = "🏪";
+        color = "#27ae60"; // 緑
+        typeLabel = "コンビニ";
+    } else if (type === 'toilets') {
+        iconChar = "🚻";
+        color = "#9b59b6"; // 紫
+        typeLabel = "トイレ";
+    } else if (type === 'parking') {
+        iconChar = "🅿️";
+        color = "#34495e"; // 紺
+        typeLabel = "駐車場";
+    }
+
+    // クエリ作成
+    const query = `
+        [out:json][timeout:25];
+        (
+            node["${queryKey}"="${queryValue}"](${bbox});
+            way["${queryKey}"="${queryValue}"](${bbox});
+        );
+        out center;
+    `;
+
+    try {
+        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if(data.elements.length === 0) {
+            status.innerText = `${typeLabel}は見つかりませんでした。範囲を変えてみてください。`;
+        } else {
+            status.innerText = `${typeLabel}が${data.elements.length}件見つかりました。`;
+            
+            data.elements.forEach(el => {
+                let lat = el.lat;
+                let lon = el.lon;
+                if (!lat && el.center) { lat = el.center.lat; lon = el.center.lon; }
+
+                const name = el.tags.name || typeLabel;
+
+                const osmIcon = L.divIcon({
+                    html: `<div style="background:${color}; width:24px; height:24px; border-radius:50%; color:white; display:flex; justify-content:center; align-items:center; font-size:12px; border:2px solid white; box-shadow:0 2px 4px rgba(0,0,0,0.3);">${iconChar}</div>`,
+                    className: ''
+                });
+
+                L.marker([lat, lon], { icon: osmIcon })
+                 .bindPopup(`<b>${name}</b><br>種別: ${typeLabel}<br><small>OpenStreetMapデータ</small>`)
+                 .addTo(osmLayer);
+            });
+        }
+    } catch(e) {
+        console.error(e);
+        status.innerText = "検索に失敗しました。リロードして試してください。";
+    } finally {
+        btn.disabled = false;
+        btn.innerText = "🗺️ 周辺を検索";
+    }
+}
+
+
+// --- 1. グローバル変数と初期化処理 ---
+let dailyCatchData = {}; // 釣果データを保存するオブジェクト
+
+// ページ読み込み時の処理
+window.addEventListener('load', () => {
+    initChatSystem();
+});
+
+function initChatSystem() {
+    const today = new Date().toDateString();
+    const lastDate = localStorage.getItem('chatDate');
+
+    // 日付が変わっていたらリセット
+    if (lastDate !== today) {
+        localStorage.setItem('chatDate', today);
+        localStorage.removeItem('chatLog');
+        localStorage.removeItem('catchData');
+        dailyCatchData = {};
+    } else {
+        // 同じ日ならデータを復元
+        const savedLog = JSON.parse(localStorage.getItem('chatLog')) || [];
+        const savedData = JSON.parse(localStorage.getItem('catchData')) || {};
+        dailyCatchData = savedData;
+        
+        // チャット履歴を表示
+        const chatBox = document.getElementById('chat-history');
+        if(chatBox) {
+            chatBox.innerHTML = '';
+            savedLog.forEach(msg => addMessageToDOM(msg));
+        }
+    }
+}
+
+// 画面読み込み時に初期化を実行
+window.addEventListener('load', initChatSystem);
+
+async function postChat() {
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    // 1. 即座にチャット画面に表示
+    addMessageToDOM({
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        text: text
+    });
+
+    // 2. スポット名のリストを準備（AIに「この中から選んで」と教えるため）
+    const spotNames = FISHING_SPOTS.map(s => s.name);
+
+    // 3. AIに解析を依頼
+    const aiResult = await analyzeTextWithAI(text, spotNames);
+
+    if (aiResult && aiResult.spot) {
+        // AIが選んだ正確なスポット名でデータを更新
+        updateCatchDataFromAI(aiResult.spot, aiResult.fish_data);
+        
+        // AIの返答を表示
+        const replyText = aiResult.fish_data.map(f => `${f.fish}${f.count}匹`).join('、');
+        addMessageToDOM({
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            text: `🤖 釣果を更新しました！ (${aiResult.spot}: ${replyText})`
+        });
+
+        // 画面を再描画
+        if (typeof lastSpotsData !== 'undefined') {
+            renderResults(lastSpotsData);
+        }
+    }
+    input.value = '';
+}
+
+// AIの結果を dailyCatchData に保存する専用関数
+function updateCatchDataFromAI(spotName, fishDataList) {
+    if (!dailyCatchData[spotName]) {
+        dailyCatchData[spotName] = { total: 0, details: {} };
+    }
+
+    fishDataList.forEach(item => {
+        const count = parseInt(item.count);
+        dailyCatchData[spotName].total += count;
+        
+        // 内訳を更新（既存の数に加算）
+        if (!dailyCatchData[spotName].details[item.fish]) {
+            dailyCatchData[spotName].details[item.fish] = 0;
+        }
+        dailyCatchData[spotName].details[item.fish] += count;
+    });
+
+    localStorage.setItem('catchData', JSON.stringify(dailyCatchData));
+}
+
+// データを更新してlocalStorageに保存する関数
+function updateCatchData(result) {
+    const spotName = result.spot;
+    const fishName = result.fish;
+    const count = parseInt(result.count, 10) || 0;
+
+    if (count <= 0) return;
+
+    // データ構造の初期化
+    if (!dailyCatchData[spotName]) {
+        dailyCatchData[spotName] = { total: 0, details: {} };
+    }
+
+    // 合計を加算
+    dailyCatchData[spotName].total += count;
+
+    // 魚種ごとの内訳を加算
+    if (!dailyCatchData[spotName].details[fishName]) {
+        dailyCatchData[spotName].details[fishName] = 0;
+    }
+    dailyCatchData[spotName].details[fishName] += count;
+
+    // 保存
+    localStorage.setItem('catchData', JSON.stringify(dailyCatchData));
+}
+
+// AI解析関数：表記揺れと複数魚種に対応
+async function analyzeTextWithAI(text, spotList) {
+    const API_KEY = API_KEYS.openai;
+    
+    const prompt = `
+    釣り人の報告から【釣り場】【魚種】【匹数】を抽出してください。
+    
+    1. "spot": 以下のリストの中から、報告に最も近い場所名を1つ選んでください。
+       リスト: [${spotList.join(', ')}]
+    2. "fish_data": 釣れた魚と数のリストを JSON形式で返してください。
+    
+    報告例: 「豊島港でアジ1とマグロ1匹」
+    返却例: {"spot": "豊島・豊島港", "fish_data": [{"fish": "アジ", "count": 1}, {"fish": "マグロ", "count": 1}]}
+    `;
+
+    try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify({
+                model: "gpt-3.5-turbo",
+                messages: [
+                    { role: "system", content: prompt },
+                    { role: "user", content: text }
+                ],
+                temperature: 0
+            })
+        });
+        const data = await response.json();
+        return JSON.parse(data.choices[0].message.content);
+    } catch (e) {
+        console.error("AI解析失敗:", e);
+        return null;
+    }
+}
+
+//表示関連(renderResultsとtoggleCatchDetail)
+function addMessageToDOM(msg) {
+    const chatBox = document.getElementById('chat-history');
+    const div = document.createElement('div');
+    div.style.marginBottom = "5px";
+    div.style.borderBottom = "1px dotted #eee";
+    div.innerHTML = `<span style="color:#666; font-size:10px;">[${msg.time}]</span> ${msg.text}`;
+    chatBox.appendChild(div);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+// 文章解析ロジック
+function analyzeAndRegisterCatch(text) {
+    let updated = false;
+
+    // 1. どのポイントの話か特定する
+    // FISHING_SPOTS は既存のコードで定義されているはず
+    const spot = FISHING_SPOTS.find(s => text.includes(s.name));
+    if (spot) {
+        // データ初期化
+        if (!dailyCatchData[spot.id]) {
+            dailyCatchData[spot.id] = { total: 0, details: {} };
+        }
+
+        // 2. 魚と数を探す
+        // 簡易的な魚リスト（必要に応じて追加してください）
+        const fishes = ["アジ", "サヨリ", "イワシ", "メバル", "チヌ", "タイ", "キス", "カレイ", "タコ", "イカ", "ハマチ", "シーバス"];
+    
+        fishes.forEach(fishName => {
+            //"マグロ1匹" "マグロが2ひき" などのパターンを検索
+            if (text.includes(fishName)) {
+                // 数字を探す正規表現（漢数字対応）
+                const regex = new RegExp(`(${fishName}.*?(\\d+|[一二三四五六七八九十]+)|(\\d+|[一二三四五六七八九十]+).*?${fishName})`, 'g');
+                const match = text.match(regex); // マッチした部分を取得
+
+                if(match){
+                    //文字列から数字だけを抽出して足す
+                    const numMatch = match[0].match(/(\d+|[一二三四五六七八九十]+)/);
+                    if(numMatch){
+                        const count = parseNumber(numMatch[0]);
+                        dailyCatchData[spot.name].total += count;
+                        dailyCatchData[spot.name].details.push(`${fishName}: ${count}`);
+                        updated = true;
+                    }
+                }
+            }
+        });
+
+        if(updated){
+            localStorage.setItem('catchData', JSON.stringify(dailyCatchData));
+            //★リストを再描画して数字を更新！
+            if(currentSpotsData.length > 0){
+                renderResults(currentSpotsData);
+            }
+        }
+    }
+}
+
+// 漢数字を数字に変換する補助関数
+function parseNumber(str) {
+    if (!isNaN(str)) return parseInt(str, 10);
+    const kanji = { '一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9, '十':10 };
+    return kanji[str] || 0;
+}
+
+function clearOsmSpots(){
+    osmLayer.clearLayers();
+    document.getElementById('osm-clear-btn').style.display = 'none';
+    document.getElementById('osm-status').innerText = "表示をクリアしました。";
+}
+
+function toggleOsmButtons(hasData){
+}
+
+async function fetchWeather(dateValue) {
+    // 日付を YYYY-MM-DD 形式に整形
+    const targetDate = new Date(dateValue);
+    const dateStr = targetDate.toISOString().split('T')[0];
+    
+    // 呉市の座標
+    const lat = 34.23;
+    const lon = 132.56;
+
+    try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,windspeed_10m_max,weathercode&timezone=Asia%2FTokyo&start_date=${dateStr}&end_date=${dateStr}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Weather API Error");
+        
+        const data = await response.json();
+        
+        return {
+            temp_max: data.daily.temperature_2m_max[0],
+            temp_min: data.daily.temperature_2m_min[0],
+            temp_avg: ((data.daily.temperature_2m_max[0] + data.daily.temperature_2m_min[0]) / 2).toFixed(1),
+            precipitation_prob: data.daily.precipitation_probability_max[0],
+            wind_speed: data.daily.windspeed_10m_max[0],
+            weather_code: data.daily.weathercode[0]
+        };
+    } catch (error) {
+        console.error("天気取得失敗:", error);
+        return { temp_avg: "--", wind_speed: "--", precipitation_prob: "--" };
+    }
+}
+
+async function getWaterTempFinal() {
+    // 1. まず Kure-API を試す (401エラーになる場合はスキップされます)
+    try {
+        const response = await fetch("https://api.expolis.cloud/opendata/t/kure/v1/water-temperature-1", {
+            headers: { 
+                'Authorization': `Bearer ${API_KEYS.kure}`,
+                'Accept': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            return FISHING_SPOTS.map(spot => {
+                const senserData = data.find(d => d.device_id === spot.id);
+                return { 
+                    id: spot.id, 
+                    temp: (senserData && senserData.water_temperatures[0]) ? senserData.water_temperatures[0].surface.value : 18.0 
+                };
+            });
+        }
+    } catch (e) { console.warn("Kure-API不可。"); }
+
+    // 2. 海しるAPI (画像の情報を反映した修正版)
+    try {
+        // 画像に基づいた設定
+        const baseUrl = "https://api.msil.go.jp/water-temperature-link/v2/MapServer/0/query";
+        const params = new URLSearchParams({
+            f: "json",
+            where: "1=1",
+            // 画像のように範囲(Envelope)で指定
+            geometry: "132.3,34.1,133.0,34.4", 
+            geometryType: "esriGeometryEnvelope",
+            inSR: "4326",
+            spatialRel: "esriSpatialRelIntersects",
+            outFields: "w_temp,obs_time_dts",
+            orderByFields: "obs_time_dts DESC",
+            resultRecordCount: "1"
+        });
+
+        const res = await fetch(`${baseUrl}?${params.toString()}`, {
+            headers: {
+                'Ocp-Apim-Subscription-Key': API_KEYS.umishiru // ★ここにキーを入力
+            }
+        });
+
+        const msilData = await res.json();
+        let backupTemp = 18.0;
+
+        if (msilData.features && msilData.features.length > 0) {
+            backupTemp = msilData.features[0].attributes.w_temp || 18.0;
+            console.log(`✅ 海しる取得成功: ${backupTemp}度`);
+        }
+
+        return FISHING_SPOTS.map(spot => ({ id: spot.id, temp: backupTemp }));
+
+    } catch (err) {
+        console.error("海しるAPI失敗:", err);
+        return FISHING_SPOTS.map(spot => ({ id: spot.id, temp: 18.0 }));
+    }
+};
+
+function updateWeatherUI(weather){
+    const el = document.getElementById('weather-info');
+    const alertBar = document.getElementById('alert-bar');
+
+    let rainAdvice = "";
+    let adviceColor = "";
+
+    if(weather.rainProb >= 70){
+        rainAdvice = "❌ 【釣行はおすすめしません】 本降りの雨になる可能性が高いです。視界も悪くなるため中止を検討してください。";
+        adviceColor = "#ff4757";
+    }else if(weather.rainProb >= 40){
+        rainAdvice = "⚠️ 【レインウェア必須】 雨が降る可能性があります。傘よりも、動きやすいレインコートを準備してください。";
+        adviceColor = "#ffa502";
+    }else if(weather.rainProb >= 20){
+        rianAdvice = "💡 【折りたたみ傘があると安心】 急な小雨の可能性があります。準備しておきましょう。";
+        adviceColor = "#2e86de";
+    }else {
+        rainAdvice = "✨ 【雨の心配なし】 傘は不要です。快適に釣りを楽しめます。";
+        adviceColor = "#2ed573";
+    }
+
+    let tempAdvice = "";
+    let tempColor = "";
+
+    if(weather.temp >= 30){
+        tempAdvice = "🔥 【熱中症厳重警戒】 こまめに水分・塩分補給を！無理せず日陰で休憩してください。";
+        tempColor = "ff4757";
+    }else if (weather.temp >= 25) {
+        tempAdvice = "☀️ 【夏日】 暑くなります。帽子を着用し、水分補給を忘れずに。";
+        tempColor = "#ffa502"; // オレンジ
+    } else if (weather.temp <= 10) {
+        tempAdvice = "❄️ 【極寒注意】 指先や足元が冷えます。カイロや厚手の防寒着で対策を。";
+        tempColor = "#2e86de"; // 青
+    } else if (weather.temp <= 15) {
+        tempAdvice = "🧥 【肌寒い】 上着が必要です。海辺は風で体感温度が下がります。";
+        tempColor = "#54a0ff"; // 水色
+    } else {
+        tempAdvice = "🍀 【快適】 過ごしやすい気温です。";
+        tempColor = "#2ed573"; // 緑
+    }
+
+
+    el.innerHTML = `
+        <div>気温: <b>${weather.temp}℃</b></div>
+        <div>風速: <b>${weather.wind}m/s</b></div>
+        <div>降水確率: <b>${weather.rainProb}%</b></div>
+    `;
+
+    
+
+    let bgColor = '#8ed04d';
+    let message = '';
+    let description = '';
+
+    if (weather.wind >= 15) {
+        bgColor = '#800080';
+        message = '⚠️ 【極めて危険】 外出禁止レベル';
+        description = '（看板やトタンが外れ、転倒する人もいる猛烈な風です。命を守る行動を！）';
+
+    } else if(weather.wind >= 10){
+        bgColor = '#ff4757';
+        message = '⚠️ 【強風警報レベル】 釣行不可';
+        description = '（傘が壊れる強さで、体が煽られフラつく風です。波止からの転落の危険が非常に高いです！）';
+    } else if(weather.wind >= 6){
+        bgColor = '#ffa502';
+        message = '⚠️ 【注意】 風が強まっています';
+        description = '（砂埃が立ち、餌箱や軽い荷物が飛ばされる風です。無理な釣行は控えましょう。）';
+    } else {
+        bgColor = '#8ed04d';
+        message = '✅ 【安全】 釣行可能';
+        description = '（穏やかなそよ風です。仕掛けも投げやすく、安全に釣りを楽しめます。）';
+    }
+
+    alertBar.style.display = 'block';
+    alertBar.style.backgroundColor = bgColor;
+    alertBar.style.color = '#fff';
+    alertBar.style.padding = '10px';
+    alertBar.style.textAlign = 'center';
+    alertBar.style.fontWeight = 'bold';
+
+    alertBar.innerHTML = `
+        <span>${message} 現在、風速 ${weather.wind}m/s です。</span>
+        <div style="font-size: 12px; font-weight: normal; margin-top: 5px;">${description}</div>
+    `;
+}
+
+function showLoading(show) {
+    document.getElementById('loading-overlay').style.display = show ? 'flex' : 'none';
+}
+
+
+// --- AI釣り相談チャット機能 ---
+// チャット窓の開閉
+function toggleAiChat() {
+    const win = document.getElementById('ai-chat-window');
+    if (win.style.display === 'none' || win.style.display === '') {
+        win.style.display = 'flex';
+        document.getElementById('ai-user-input').focus();
+    } else {
+        win.style.display = 'none';
+    }
+}
+
+// Enterキーで送信
+function handleAiEnter(e) {
+    if (e.key === 'Enter') sendToAiAdvisor();
+}
+
+//タブ切り替えの制御
+function switchChatTab(type){
+    const logTab = document.getElementById('tab-log');
+    const aiTab = document.getElementById('tab-ai');
+    const logPanel = document.getElementById('panel-log');
+    const aiPanel = document.getElementById('panel-ai');
+
+    if(type === 'log'){
+        logPanel.style.display = 'flex';
+        aiPanel.style.display = 'none';
+        logTab.style.background = '#fff';
+        aiTab.style.background = '#f1f3f5';
+    }else{
+        logPanel.style.display = 'none';
+        aiPanel.style.display = 'flex';
+        logTab.style.background = '#f1f3f5';
+        aiTab.style.background = '#fff';
+    }
+}
+
+// --- 2. AI相談用の送信処理（釣果解析とは別の用途） ---
+async function sendToAiAdvisor() {
+    const input = document.getElementById('ai-user-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    // 自分のメッセージを表示
+    addAiMessageToDOM(text, 'user');
+    input.value = '';
+
+    const API_KEY = API_KEYS.openai; // 共通のAPIキー変数があればそれを使用
+
+    try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+            body: JSON.stringify({
+                model: "gpt-3.5-turbo",
+                messages: [
+                    { role: "system", content: "あなたは呉市のベテラン釣り師です。釣り方やエサの質問に、具体的かつ親切に答えてください。" },
+                    { role: "user", content: text }
+                ],
+                temperature: 0.7
+            })
+        });
+
+        const data = await response.json();
+        const aiReply = data.choices[0].message.content;
+        addAiMessageToDOM(aiReply, 'system');
+    } catch (error) {
+        addAiMessageToDOM("申し訳ありません、うまく答えられませんでした。", 'system');
+    }
+}
+
+// AIメッセージを画面に出す補助関数
+function addAiMessageToDOM(text, role) {
+    const container = document.getElementById('ai-chat-messages');
+    const div = document.createElement('div');
+    div.style.padding = "8px";
+    div.style.borderRadius = "8px";
+    div.style.maxWidth = "85%";
+    div.style.marginBottom = "5px";
+    div.style.fontSize = "11px";
+
+    if (role === 'user') {
+        div.style.background = "#007bff";
+        div.style.color = "white";
+        div.style.alignSelf = "flex-end";
+    } else {
+        div.style.background = "#e9ecef";
+        div.style.color = "#333";
+        div.style.alignSelf = "flex-start";
+    }
+    div.innerText = text;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+// メッセージを画面に追加する関数
+function addAiMessage(text, type) {
+    const container = document.getElementById('ai-chat-messages');
+    const div = document.createElement('div');
+    div.className = `ai-message ${type}`;
+    div.innerText = text; // 安全のためinnerTextを使用
+    
+    // ローディング削除用のID
+    const msgId = Date.now();
+    div.setAttribute('data-msg-id', msgId);
+
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight; // 一番下へスクロール
+    return msgId;
+}
+
+
+</script>
+</body>
+</html>

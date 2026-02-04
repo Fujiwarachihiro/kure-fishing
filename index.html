@@ -221,7 +221,25 @@
             border-radius: 4px;
             cursor: pointer;
         }
-
+        #dashboard-view{
+            width:50vh;
+            height:100vh;
+            overflow-y:auto;
+            overflow-x:hidden;
+            padding-bottom:80px;
+            z-index:10;
+            position:relative;
+        }
+        #trendChartsContainer{
+            max-height:70vh;
+            overflow-y:auto;
+            padding-bottom:70px;
+        }
+        #dashboard-back-btn {
+            position: sticky;
+            bottom: 10px;
+            left: 0;
+        }
     </style>
 </head>
 <body>
@@ -298,7 +316,7 @@
             </div>
             <div style="display: flex; gap: 5px;">
                 <input type="text" id="chat-input" placeholder="例: 阿賀マリノポリスでアジが3匹釣れた" style="flex: 1; font-size: 11px">
-                <button onclick="postChat()" class="btn-primary" style="width: auto; padding: 0 10px; font-size:11px;">送信</button>
+                <button onclick="console.log('ボタンが押された');postChat(); sendToAiAdvisor();" class="btn-primary" style="width: auto; padding: 0 10px; font-size:11px;">送信</button>
             </div>
         </div>
 
@@ -315,9 +333,29 @@
     </div>
 
     <div id="map"></div>
+    <div id="map-view"></div>
+    <div id="dashboard-view" style="display:none; padding:20px;">
+        <button onclick="showMap()" style="margin-top:20px; padding: 10px 20px; cursor: pointer;">
+            🗺 マップに戻る
+        </button>
+        <h2>📊 釣果ダッシュボード</h2>
+
+        <h3>📍 釣り場別・総釣果</h3>
+        <canvas id="fishChart" width="400" height="200"></canvas>
+
+        <hr style="margin: 40px 0;">
+
+        <h3>📈 各釣り場の月別トレンド</h3>
+        <div id="trendChartsContainer" style="display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                gap: 20px;">
+        </div>
+    </div>
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <script>
 
 // --- 1. データ定義 (DB相当) ---
@@ -453,6 +491,24 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors'
 }).addTo(map);
 
+//ダッシュボードボタンを置く
+const dashboardControl = L.control({ position: 'topright' });
+dashboardControl.onAdd = function () {
+  const btn = L.DomUtil.create('button');
+  btn.innerHTML = '📊 ダッシュボード';
+  btn.style.padding = '6px 10px';
+  btn.style.marginTop = '70px';
+  btn.style.cursor = 'pointer';
+
+  btn.onclick = showDashboard;
+
+  return btn;
+};
+
+dashboardControl.addTo(map);
+
+
+
 //apiキーを管理するグローバル変数
 let API_KEYS = {
     kure: '',
@@ -494,32 +550,12 @@ document.getElementById('save-keys-btn').addEventListener('click', () => {
     
     localStorage.setItem('my_fishing_api_keys', JSON.stringify(API_KEYS));
     
-    // 海流レイヤー（tidalLayer）が既にある場合は、新しいキーを反映させる
-    if (typeof tidalLayer !== 'undefined') {
-        tidalLayer.options.ocp_apim_subscription_key = API_KEYS.umishiru;
-        tidalLayer.redraw();
-    }
-    
     const status = document.getElementById('save-status');
     if(status) {
         status.innerText = "✅ 保存しました（反映には再読み込みを推奨）";
         setTimeout(() => { status.innerText = ""; }, 3000);
     }
 });
-
-/*
-// 海しるAPIの海流レイヤーを追加
-const tidalLayer = L.tileLayer.wms("https://api.msil.go.jp/oceanography/tidal-stream/prediction/seto-island-sea/v2/wms", {
-    layers: '0', // 海流のレイヤー名
-    format: 'image/png',
-    transparent: true,
-    opacity: 0.8, // 少し透けさせる
-    styles: 'style-arrow-blue',
-    ocp_apim_subscription_key: API_KEYS.umishiru,
-}).addTo(map);
-*/
-
-
 
 async function getFishDataFromAI(fishName){
     const API_KEY = API_KEYS.openai;
@@ -585,10 +621,6 @@ async function runAnalysis() {
         const weather = await fetchWeather(date);
         updateWeatherUI(weather);
 
-        /*
-        // 修正：関数名が getWaterTempFinal か fetchWaterTemp か確認してください
-        const waterDataList = await getWaterTempFinal(); 
-        */
         const waterDataList = await fetchWaterTemp();
 
         // --- C. スコア計算 ---
@@ -609,6 +641,7 @@ async function runAnalysis() {
 
         // --- D. 描画 ---
         renderResults(rankedSpots, weather);
+        
 
     } catch (e) {
         console.error("解析エラー:", e);
@@ -938,10 +971,43 @@ async function searchNearbySpots() {
 
 // --- 1. グローバル変数と初期化処理 ---
 let dailyCatchData = {}; // 釣果データを保存するオブジェクト
+let trendChartInstances = []; 
 
-// ページ読み込み時の処理
+let fishChartInstance = null;
+let trendChartInstance = null;
+
+const SPOT_NAMES = FISHING_SPOTS.map(spot => spot.name);
+
+// 画面読み込み時に初期化を実行
 window.addEventListener('load', () => {
     initChatSystem();
+
+    // ★ 日別データ（釣果チャット用） 
+    dailyCatchData = JSON.parse(localStorage.getItem('dailyCatchData')) || {};
+    // ★ 月間データ（棒グラフ）の寿命チェック
+    const currentMonth = new Date().getMonth() + 1;
+    const savedMonth = localStorage.getItem('monthlyCatchMonth');
+
+    if (savedMonth != currentMonth) {
+        monthlyCatchData = {};
+        localStorage.setItem('monthlyCatchMonth', currentMonth);
+    } else {
+        monthlyCatchData = JSON.parse(localStorage.getItem('monthlyCatchData')) || {};
+    }
+
+    // ★ 年間データ（折れ線グラフ）の寿命チェック
+    const currentYear = new Date().getFullYear();
+    const savedYear = localStorage.getItem('yearlyCatchYear');
+
+    if (savedYear != currentYear) {
+        yearlyCatchData = {};
+        localStorage.setItem('yearlyCatchYear', currentYear);
+    } else {
+        yearlyCatchData = JSON.parse(localStorage.getItem('yearlyCatchData')) || {};
+    }
+
+    // グラフ描画
+    updateDashboard();
 });
 
 function initChatSystem() {
@@ -969,64 +1035,103 @@ function initChatSystem() {
     }
 }
 
-// 画面読み込み時に初期化を実行
-window.addEventListener('load', initChatSystem);
-
 async function postChat() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
     if (!text) return;
 
-    // 1. 即座にチャット画面に表示
-    addMessageToDOM({
+    // ★ ここで message を必ず作る（これがないとエラーになる）
+    const message = {
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         text: text
-    });
+    };
 
-    // 2. スポット名のリストを準備（AIに「この中から選んで」と教えるため）
+    // 1. 即座にチャット画面に表示
+    addMessageToDOM(message);
+
+    // ★ チャットログを保存（これが無いと最後の投稿が消える）
+    const chatLog = JSON.parse(localStorage.getItem('chatLog')) || [];
+    chatLog.push(message);
+    localStorage.setItem('chatLog', JSON.stringify(chatLog));
+
+    // 2. スポット名リスト
     const spotNames = FISHING_SPOTS.map(s => s.name);
 
-    // 3. AIに解析を依頼
+    // 3. AI解析
     const aiResult = await analyzeTextWithAI(text, spotNames);
 
     if (aiResult && aiResult.spot) {
-        // AIが選んだ正確なスポット名でデータを更新
+
         updateCatchDataFromAI(aiResult.spot, aiResult.fish_data);
-        
-        // AIの返答を表示
-        const replyText = aiResult.fish_data.map(f => `${f.fish}${f.count}匹`).join('、');
-        addMessageToDOM({
+
+        const replyText = aiResult.fish_data
+            .map(f => `${f.fish}${f.count}匹`)
+            .join('、');
+
+        const aiMessage = {
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             text: `🤖 釣果を更新しました！ (${aiResult.spot}: ${replyText})`
-        });
+        };
 
-        // 画面を再描画
+        addMessageToDOM(aiMessage);
+
+        // ★ AIメッセージも保存したいならここ
+        chatLog.push(aiMessage);
+        localStorage.setItem('chatLog', JSON.stringify(chatLog));
+
         if (typeof lastSpotsData !== 'undefined') {
             renderResults(lastSpotsData);
         }
     }
+
     input.value = '';
 }
 
-// AIの結果を dailyCatchData に保存する専用関数
 function updateCatchDataFromAI(spotName, fishDataList) {
+    // ① dailyCatchData（1日）
     if (!dailyCatchData[spotName]) {
         dailyCatchData[spotName] = { total: 0, details: {} };
     }
 
     fishDataList.forEach(item => {
         const count = parseInt(item.count);
+
         dailyCatchData[spotName].total += count;
-        
-        // 内訳を更新（既存の数に加算）
+
         if (!dailyCatchData[spotName].details[item.fish]) {
             dailyCatchData[spotName].details[item.fish] = 0;
         }
         dailyCatchData[spotName].details[item.fish] += count;
     });
 
+    // ② monthlyCatchData（1か月）
+    if (!monthlyCatchData[spotName]) {
+        monthlyCatchData[spotName] = 0;
+    }
+    fishDataList.forEach(item => {
+        monthlyCatchData[spotName] += parseInt(item.count);
+    });
+
+    // ③ yearlyCatchData（1年）
+    const month = new Date().getMonth() + 1;
+
+    if (!yearlyCatchData[spotName]) {
+        yearlyCatchData[spotName] = {};
+    }
+    if (!yearlyCatchData[spotName][month]) {
+        yearlyCatchData[spotName][month] = 0;
+    }
+    fishDataList.forEach(item => {
+        yearlyCatchData[spotName][month] += parseInt(item.count);
+    });
+
+    // ④ 保存（更新した後に保存）
     localStorage.setItem('catchData', JSON.stringify(dailyCatchData));
+    localStorage.setItem('dailyCatchData', JSON.stringify(dailyCatchData));
+    localStorage.setItem('monthlyCatchData', JSON.stringify(monthlyCatchData));
+    localStorage.setItem('yearlyCatchData', JSON.stringify(yearlyCatchData));
 }
+
 
 // データを更新してlocalStorageに保存する関数
 function updateCatchData(result) {
@@ -1114,131 +1219,70 @@ function toggleOsmButtons(hasData){
 }
 
 async function fetchWeather(dateValue) {
-    // 日付を YYYY-MM-DD 形式に整形
     const targetDate = new Date(dateValue);
     const dateStr = targetDate.toISOString().split('T')[0];
-    
-    // 呉市の座標
     const lat = 34.23;
     const lon = 132.56;
 
+    // ★修正1: URLパラメータに '&wind_speed_unit=ms' を追加 (これでm/sになります)
+    // ★修正2: 過去データに確率は存在しないため 'precipitation_sum' (降水量) に変更
+    const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,weathercode&timezone=Asia%2FTokyo&start_date=${dateStr}&end_date=${dateStr}&wind_speed_unit=ms`;
+
     try {
-        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,windspeed_10m_max,weathercode&timezone=Asia%2FTokyo&start_date=${dateStr}&end_date=${dateStr}`;
-        
         const response = await fetch(url);
         if (!response.ok) throw new Error("Weather API Error");
         
         const data = await response.json();
-        
+
+        // データが配列で返ってくるため、安全に取り出す
+        const maxTemp = data.daily.temperature_2m_max?.[0] ?? 0;
+        const minTemp = data.daily.temperature_2m_min?.[0] ?? 0;
+        const windSpeed = data.daily.windspeed_10m_max?.[0] ?? 0;
+        const rainAmount = data.daily.precipitation_sum?.[0]; // nullの可能性あり
+
+        // 平均気温の計算
+        const avgTemp = ((maxTemp + minTemp) / 2).toFixed(1);
+
+        // ★修正3: 降水確率の代わりに「降水量(mm)」を表示するロジックへ
+        // 過去データ分析なら「降ったかどうか」の方が重要です
+        let rainDisplay = "0mm";
+        if (rainAmount !== undefined && rainAmount !== null) {
+            rainDisplay = `${rainAmount}`;
+        }
+
         return {
-            /*
-            temp: data.daily.temperature_2m_max[0],
-            temp: data.daily.temperature_2m_min[0],
-            temp: ((data.daily.temperature_2m_max[0] + data.daily.temperature_2m_min[0]) / 2).toFixed(1),
-            precipitation_prob: data.daily.precipitation_probability_max[0],
-            wind_speed: data.daily.windspeed_10m_max[0],
-            weather_code: data.daily.weathercode[0]
-            */
-            temp: ((data.daily.temperature_2m_max[0] + data.daily.temperature_2m_min[0]) / 2).toFixed(1),
-            wind: data.daily.windspeed_10m_max[0],
-            rainProb: data.daily.precipitation_probability_max[0],
+            temp: avgTemp,
+            wind: `${windSpeed}`, // 単位を明記
+            rainProb: rainDisplay     // UIのラベルも「降水確率」から「降水量」に変えるとベスト
         };
+
     } catch (error) {
         console.error("天気取得失敗:", error);
-        return { temp_avg: "--", wind_speed: "--", precipitation_prob: "--" };
+        return { temp: "--", wind: "--m/s", rainProb: "--" };
     }
 }
 
-/*
-async function fetchWaterTemp() {
-    // 1. まず Kure-API を試す (401エラーになる場合はスキップされます)
-    try {
-        const response = await fetch("https://api.expolis.cloud/opendata/t/kure/v1/water-temperature-1", {
-            headers: { 
-                'Authorization': `Bearer ${API_KEYS.kure}`,
-                'Accept': 'application/json'
-            }
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            return FISHING_SPOTS.map(spot => {
-                const senserData = data.find(d => d.device_id === spot.id);
-                return { 
-                    id: spot.id, 
-                    temp: (senserData && senserData.water_temperatures[0]) ? senserData.water_temperatures[0].surface.value : 18.0 
-                };
-            });
-        }
-    } catch (e) { console.warn("Kure-API不可。"); }
-
-    // 2. 海しるAPI (画像の情報を反映した修正版)
-    try {
-        // 画像に基づいた設定
-        const baseUrl = "https://api.msil.go.jp/water-temperature-link/v2/MapServer/0/query";
-        const params = new URLSearchParams({
-            f: "json",
-            where: "1=1",
-            // 画像のように範囲(Envelope)で指定
-            geometry: "132.3,34.1,133.0,34.4", 
-            geometryType: "esriGeometryEnvelope",
-            inSR: "4326",
-            spatialRel: "esriSpatialRelIntersects",
-            outFields: "w_temp,obs_time_dts",
-            orderByFields: "obs_time_dts DESC",
-            resultRecordCount: "1"
-        });
-
-        const res = await fetch(`${baseUrl}?${params.toString()}`, {
-            headers: {
-                'Ocp-Apim-Subscription-Key': API_KEYS.umishiru // ★ここにキーを入力
-            }
-        });
-
-        const msilData = await res.json();
-        let backupTemp = 18.0;
-
-        if (msilData.features && msilData.features.length > 0) {
-            backupTemp = msilData.features[0].attributes.w_temp || 18.0;
-            console.log(`✅ 海しる取得成功: ${backupTemp}度`);
-        }
-
-        return FISHING_SPOTS.map(spot => ({ id: spot.id, temp: backupTemp }));
-
-    } catch (err) {
-        console.error("海しるAPI失敗:", err);
-        return FISHING_SPOTS.map(spot => ({ id: spot.id, temp: 18.0 }));
-    }
-};
-*/
 
 async function fetchWaterTemp() {
-
   // 1. 呉API
   try {
     const kureRes = await fetch(
-      "https://api.expolis.cloud/opendata/t/kure/v1/water-temperature-1" +
-      `?apiKey=${API_KEYS.kure}`
-    );
-
-    if (kureRes.ok) {
-      const data = await kureRes.json();
-      return FISHING_SPOTS.map(spot => {
-        const sensor = data.find(d => d.device_id === spot.id);
-        return {
-          id: spot.id,
-          temp: sensor?.water_temperatures?.[0]?.surface?.value ?? 18.0
-        };
-      });
-    }
+      "https://api.expolis.cloud/opendata/t/kure/v1/water-temperature-1",
+      {
+        headers: {
+            "ecp-api-token":API_KEYS.kure,
+            Accept:"application/json"
+        }
+      }
+    );   
   } catch {
     console.warn("呉API失敗 → 海しるへ");
   }
 
-  // 2. 海しるAPI
+  // 2. 呉がだめだった時の海しるAPI
   try {
     const baseUrl =
-      "https://api.msil.go.jp/water-temperature-link/v2/MapServer/0/query";
+      "https://api.msil.go.jp/water-temperature-link/v2/MapServer/1/query";
 
     const params = new URLSearchParams({
       f: "json",
@@ -1253,6 +1297,7 @@ async function fetchWaterTemp() {
       "subscription-key": API_KEYS.umishiru
     });
 
+    
     const res = await fetch(`${baseUrl}?${params.toString()}`);
     const data = await res.json();
 
@@ -1266,7 +1311,6 @@ async function fetchWaterTemp() {
     return FISHING_SPOTS.map(s => ({ id: s.id, temp: 18.0 }));
   }
 }
-
 
 function updateWeatherUI(weather){
     const el = document.getElementById('weather-info');
@@ -1313,7 +1357,7 @@ function updateWeatherUI(weather){
     el.innerHTML = `
         <div>気温: <b>${weather.temp}℃</b></div>
         <div>風速: <b>${weather.wind}m/s</b></div>
-        <div>降水確率: <b>${weather.rainProb}%</b></div>
+        <div>降水量: <b>${weather.rainProb}mm</b></div>
     `;
 
     
@@ -1396,63 +1440,77 @@ function switchChatTab(type){
     }
 }
 
-// --- 2. AI相談用の送信処理（釣果解析とは別の用途） ---
+function updateDashboard(){
+    //const {spotTotals, monthlyData} = buildChartDataFromCatch();
+    drawSpotBarChart();
+    drawTrendLineChart();
+}
+
 async function sendToAiAdvisor() {
-    const input = document.getElementById('ai-user-input');
+    console.log("sendToAiAdvisorが呼ばれた");
+
+    const input = document.getElementById('chat-input');
     const text = input.value.trim();
     if (!text) return;
 
-    // 自分のメッセージを表示
-    addAiMessageToDOM(text, 'user');
-    input.value = '';
-
-    const API_KEY = API_KEYS.openai; // 共通のAPIキー変数があればそれを使用
-
+    // AI（会話用）
     try {
+        console.log("AI APIに送信開始");
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEYS.openai}` },
             body: JSON.stringify({
                 model: "gpt-3.5-turbo",
                 messages: [
-                    { role: "system", content: "あなたは呉市のベテラン釣り師です。釣り方やエサの質問に、具体的かつ親切に答えてください。" },
+                    { role: "system", content: "あなたは呉市のベテラン釣り師です。短く親切に答えてください。" },
                     { role: "user", content: text }
-                ],
-                temperature: 0.7
+                ]
             })
         });
-
         const data = await response.json();
         const aiReply = data.choices[0].message.content;
-        addAiMessageToDOM(aiReply, 'system');
+        // addAiMessageToDOM(aiReply, 'system'); ←必要なら残す
     } catch (error) {
-        addAiMessageToDOM("申し訳ありません、うまく答えられませんでした。", 'system');
+        console.error("AI Chat Error:", error);
+    }
+
+    // AI（データ解析用）
+    const parsed = await parseCatchWithAI(text);
+    console.log("AI解析結果:", parsed);
+
+    if (!parsed.month) {
+        parsed.month = new Date().getMonth() + 1;
+    }
+
+    if (parsed && parsed.spot && parsed.count && parsed.month) {
+        saveCatchData(parsed.spot, parsed.fish || "魚種不明", parsed.count, parsed.month);
+        updateDashboard();
     }
 }
 
-// AIメッセージを画面に出す補助関数
 function addAiMessageToDOM(text, role) {
-    const container = document.getElementById('ai-chat-messages');
-    const div = document.createElement('div');
-    div.style.padding = "8px";
-    div.style.borderRadius = "8px";
-    div.style.maxWidth = "85%";
-    div.style.marginBottom = "5px";
-    div.style.fontSize = "11px";
+    const chatHistory = document.getElementById('chat-history'); 
+    if (!chatHistory) return;
 
+    const div = document.createElement('div');
+    div.textContent = text;  // ← text を使う
+    div.style.marginBottom = "10px";
+    div.style.padding = "8px";
+    div.style.borderRadius = "5px";
+
+    // role に応じて見た目を変える
     if (role === 'user') {
-        div.style.background = "#007bff";
-        div.style.color = "white";
-        div.style.alignSelf = "flex-end";
+        div.style.background = "#e0f7fa";
+        div.style.textAlign = "right";
     } else {
-        div.style.background = "#e9ecef";
-        div.style.color = "#333";
-        div.style.alignSelf = "flex-start";
+        div.style.background = "#f1f1f1";
+        div.style.textAlign = "left";
     }
-    div.innerText = text;
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
+
+    chatHistory.appendChild(div);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
 }
+
 
 // メッセージを画面に追加する関数
 function addAiMessage(text, type) {
@@ -1470,6 +1528,305 @@ function addAiMessage(text, type) {
     return msgId;
 }
 
+
+function showDashboard() {
+  document.getElementById('map-view').style.display = 'none';
+  document.getElementById('dashboard-view').style.display = 'block';
+
+  if(typeof FISHING_SPOTS !== 'undefined'){
+    drawSpotBarChart();
+    drawTrendLineChart();
+  }else{
+    console.error("FISHING_SPOTSが定義されていません。");
+  }
+}
+
+function showMap() {
+  document.getElementById('dashboard-view').style.display = 'none';
+  document.getElementById('map-view').style.display = 'block';
+}
+
+async function parseCatchWithAI(message) {
+  const prompt = `
+以下の文章から釣果情報を抽出しJSONで返してください。
+
+【ルール】
+- 場所はリストから選択
+- 月は文章内の日付 or 無ければ「今月」
+- month は 1〜12 の数値
+
+【場所リスト】
+${SPOT_NAMES.join(", ")}
+
+【出力形式（JSONのみ）】
+{
+  "spot": string | null,
+  "fish": string | null,
+  "count": number | null,
+  "month": number | null
+}
+
+【文章】
+${message}
+`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${API_KEYS.openai}`
+    },
+    body: JSON.stringify({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: "You output only JSON." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0
+    })
+  });
+
+  const data = await response.json();
+  console.log("AI人生データ",data);
+  const content = data.choices[0].message.content
+    .replace(/```json|```/g, "")
+    .trim();
+
+  return JSON.parse(content);
+}
+
+
+function getToday(){
+    return new Date().toISOString().split('T')[0];
+}
+
+function saveCatchData(spot, fish, count, month) {
+  const year = new Date().getFullYear();
+  const dateKey = `${year}-${String(month).padStart(2, '0')}-01`;
+
+  // ★ 月間データ（棒グラフ） 
+  if (!monthlyCatchData[spot]) monthlyCatchData[spot] = 0;
+  monthlyCatchData[spot] += count;
+  localStorage.setItem('monthlyCatchData', JSON.stringify(monthlyCatchData));
+
+  // ★ 年間データ（折れ線グラフ）
+  if (!yearlyCatchData[spot]) yearlyCatchData[spot] = {};
+  if (!yearlyCatchData[spot][month]) yearlyCatchData[spot][month] = 0;
+  yearlyCatchData[spot][month] += count;
+  localStorage.setItem('yearlyCatchData', JSON.stringify(yearlyCatchData));
+
+  if (!dailyCatchData[spot]) dailyCatchData[spot] = {};
+  if (!dailyCatchData[spot][dateKey]) {
+    dailyCatchData[spot][dateKey] = { total: 0, details: {} };
+  }
+
+  dailyCatchData[spot][dateKey].total += count;
+
+  if (!dailyCatchData[spot][dateKey].details[fish]) {
+    dailyCatchData[spot][dateKey].details[fish] = 0;
+  }
+  dailyCatchData[spot][dateKey].details[fish] += count;
+  localStorage.setItem('dailyCatchData', JSON.stringify(dailyCatchData));
+}
+
+function buildChartDataFromCatch(){
+    const spotTotals = {};
+    const monthlyData = {};
+    Object.entries(dailyCatchData).forEach(([spot, data]) => {
+        spotTotals[spot] = data.total;
+        const month = new Date().getMonth() + 1;
+        if(!monthlyData[spot]) monthlyData[spot] = {};
+        if(!monthlyData[spot][month]) monthlyData[spot][month] = 0;
+        monthlyData[spot][month] += data.total;
+    });
+    return {spotTotals, monthlyData};
+}
+
+function drawFishChart() {
+  const ctx = document.getElementById('fishChart').getContext('2d');
+
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      datasets: [{
+        label: '釣果数',
+      }]
+    }
+  });
+}
+
+//棒グラフ用。月を取得
+function getCurrentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// ★棒グラフ：データが無くても全ての場所を表示し、0を表示する
+function getMonthlySpotTotals() {
+    const result = {};
+    
+    // 1. まず全てのスポットを0で初期化（これが大事！）
+    SPOT_NAMES.forEach(name => {
+        result[name] = 0;
+    });
+
+    // 2. データがある部分だけ上書き加算
+    for (const spotName in dailyCatchData) {
+        // もしFISHING_SPOTSにある名前なら集計
+        if (result.hasOwnProperty(spotName)) {
+            let sum = 0;
+            for (const date in dailyCatchData[spotName]) {
+                sum += dailyCatchData[spotName][date].total || 0;
+            }
+            result[spotName] = sum;
+        }
+    }
+    return result;
+}
+
+function drawSpotBarChart() {
+    const ctx = document.getElementById('fishChart').getContext('2d');
+    const data = getMonthlySpotTotals();
+
+    if (fishChartInstance) fishChartInstance.destroy();
+
+    fishChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: SPOT_NAMES, // ← 全スポットをそのまま使う
+            datasets: [{
+                label: '総釣果数',
+                data: SPOT_NAMES.map(name => data[name] || 0),
+                backgroundColor: '#1f618d'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            scales: {
+                x: {
+                    ticks: {
+                        autoSkip: false,      // ★ ラベルを間引かない
+                        maxRotation: 60,
+                        minRotation: 60
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    max:20,
+                    ticks:{
+                        stepSize:5
+                    }
+                }
+            }
+        }
+    });
+}
+
+
+// ★折れ線グラフ：全スポット分の線を用意する（データなしは底を這う）
+function getMonthlyTrendData() {
+    const result = {};
+
+    // 1. 全スポット初期化
+    SPOT_NAMES.forEach(name => {
+        result[name] = Array(12).fill(0);
+    });
+
+    // 2. データ反映
+    for (const spotName in dailyCatchData) {
+        if (result[spotName]) { // 存在するスポットなら
+            for (const dateStr in dailyCatchData[spotName]) {
+                const date = new Date(dateStr);
+                const month = date.getMonth();
+                result[spotName][month] += dailyCatchData[spotName][dateStr].total || 0;
+            }
+        }
+    }
+    return result;
+}
+
+function drawTrendLineChart() {
+    const container = document.getElementById('trendChartsContainer');
+    if (!container) return;
+
+    // 1. 既存のグラフを完全に破棄して中身を空にする
+    trendChartInstances.forEach(chart => chart.destroy());
+    trendChartInstances = [];
+    container.innerHTML = '';
+
+    const months = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+    const colors = ['#e74c3c', '#3498db', '#f1c40f', '#2ecc71', '#9b59b6', '#34495e', '#16a085', '#d35400'];
+
+    // 2. FISHING_SPOTS 配列を基準に、全件ループを回す
+    // ※ SPOT_NAMES ではなく、元データである FISHING_SPOTS を直接使うのが確実です
+    FISHING_SPOTS.forEach((spot, index) => {
+        const spotName = spot.name;
+
+        // --- HTML要素の作成 ---
+        const wrapper = document.createElement('div');
+        wrapper.className = 'chart-card'; // スタイル管理用にクラス付与
+        wrapper.style.cssText = "background:#fff; padding:15px; border:1px solid #eee; border-radius:12px; box-shadow:0 2px 4px rgba(0,0,0,0.05);";
+
+        const title = document.createElement('h4');
+        title.innerHTML = `📈 ${spotName}`;
+        title.style.cssText = "font-size:14px; margin-bottom:12px; text-align:center; color:#444;";
+        
+        const canvas = document.createElement('canvas');
+        canvas.id = `chart-${index}`; // 個別IDを付与
+        
+        wrapper.appendChild(title);
+        wrapper.appendChild(canvas);
+        container.appendChild(wrapper);
+
+        // --- データの集計 ---
+        const monthlyData = Array(12).fill(0);
+        if (dailyCatchData[spotName]) {
+            for (const dateStr in dailyCatchData[spotName]) {
+                const date = new Date(dateStr);
+                if (!isNaN(date)) {
+                    const m = date.getMonth(); // 0-11
+                    monthlyData[m] += dailyCatchData[spotName][dateStr].total || 0;
+                }
+            }
+        }
+
+        // --- グラフの描画 ---
+        const ctx = canvas.getContext('2d');
+        const newChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: months,
+                datasets: [{
+                    label: '釣果数',
+                    data: monthlyData,
+                    borderColor: colors[index % colors.length],
+                    backgroundColor: colors[index % colors.length] + '22', // 透明度13%
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        max: 20,
+                        ticks: { stepSize: 5, font: { size: 10 } }
+                    },
+                    x: {
+                        ticks: { font: { size: 10 } }
+                    }
+                }
+            }
+        });
+        trendChartInstances.push(newChart);
+    });
+}
 
 </script>
 </body>

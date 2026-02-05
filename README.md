@@ -99,15 +99,15 @@ Webベースの釣行サポートアプリです。
 ---
 
 ## 🧠 技術スタック
-|分類|技術|
-|:---|:---:|---:|
-|フロントエンド	|HTML / CSS / JavaScript|
-|地図	|Leaflet / OpenStreetMap|
-|グラフ	|Chart.js|
-|AI	|OpenAI API（自然言語解析）|
-|天候	|Open-Meteo API|
-|海洋	|海しる API / 呉データプラットフォーム API|
-|データ保存	|localStorage|
+| 分類 | 技術 |
+|-----|-----|
+| フロントエンド	| HTML / CSS / JavaScript |
+| 地図	| Leaflet / OpenStreetMap |
+| グラフ	| Chart.js |
+| AI	| OpenAI API（自然言語解析） |
+| 天候	| Open-Meteo API |
+| 海洋	| 海しる API / 呉データプラットフォーム API |
+| データ保存	| localStorage |
 
 ---
 
